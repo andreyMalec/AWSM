@@ -1,0 +1,76 @@
+[fields]
+
+register
+r0 000
+r1 001
+r2 010
+r3 011
+r4 100
+r5 101
+
+[instructions]
+
+im %b(immediate|label)
+00bbbbbb
+Moves %b to r0.
+
+in %a(register)
+10110aaa
+Loads an input and stores it in [a]
+
+out %a(register)
+10aaa110
+Sends [a] to output
+
+add
+01000100
+Adds r1 and r2, stores in r3.
+
+or
+01000001
+Ors r1 and r2, stores in r3.
+
+and
+01000010
+Ands r1 and r2, stores in r3.
+
+nor
+01000011
+Nors r1 and r2, stores in r3.
+
+sub
+01000101
+Subs r2 from r1, stores in r3.
+
+mov %a(register), %b(register)
+10aaabbb
+Moves from %a to %b.
+
+jmp
+11000001
+Always jumps to r0.
+
+je
+11000010
+Jumps to r0 if r0 == 0
+
+jne
+11000011
+Jumps to r0 if r0 != 0
+
+jb
+11000100
+Jumps to r0 if r0 < 0
+
+jbe
+11000110
+Jumps to r0 if r0 <= 0
+
+ja
+11000111
+Jumps to r0 if r0 > 0
+
+jae
+11000101
+Jumps to r0 if r0 >= 0
+
