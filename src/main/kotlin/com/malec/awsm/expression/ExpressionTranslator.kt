@@ -22,6 +22,7 @@ internal class ExpressionTranslator(
             is KtConstantExpression -> storeConstant(target, expr)
             is KtNameReferenceExpression -> copyVariable(target, expr)
             is KtBinaryExpression -> assignBinaryExpression(target, expr)
+            is KtCallExpression -> assignCall(target, expr)
             else -> unsupported(expr)
         }
     }
@@ -43,6 +44,19 @@ internal class ExpressionTranslator(
         val source = symbols.require(reference.getReferencedName())
         move(source.register, resultRegister)
         move(resultRegister, target.register)
+    }
+
+    private fun assignCall(target: Symbol, expression: KtCallExpression) {
+        val calleeName = (expression.calleeExpression as? KtNameReferenceExpression)?.getReferencedName()
+            ?: error("Unsupported call")
+        when (calleeName) {
+            "input" -> {
+                val inRegister = dialect.specialRegisters.custom["in"]
+                    ?: error("ISA does not define input register")
+                move(inRegister, target.register)
+            }
+            else -> error("Unsupported call: ${expression.text}")
+        }
     }
 
     private fun assignBinaryExpression(target: Symbol, expression: KtBinaryExpression) {
@@ -67,11 +81,16 @@ internal class ExpressionTranslator(
         executeBinaryOperation(Operand.Variable(variable), operand, variable, op)
     }
 
-    private fun resolveOperand(expression: KtExpression?): Operand {
+    fun resolveOperand(expression: KtExpression?): Operand {
         val expr = expression?.unwrapParentheses() ?: unsupportedExpression("Missing operand")
         return when (expr) {
             is KtNameReferenceExpression -> Operand.Variable(symbols.require(expr.getReferencedName()))
             is KtConstantExpression -> Operand.Constant(expr.asIntConstant() ?: unsupportedExpression("Non-int constant"))
+            is KtCallExpression -> {
+                val temp = symbols.declare("__call_${expr.hashCode()}", mutable = true)
+                assign(temp, expr)
+                Operand.Variable(temp)
+            }
             else -> unsupportedExpression("Unsupported operand: ${expr.text}")
         }
     }

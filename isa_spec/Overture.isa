@@ -17,6 +17,8 @@ result = r3
 
 [special_registers]
 immediate = r0
+in = in
+out = out
 
 [instructions]
 

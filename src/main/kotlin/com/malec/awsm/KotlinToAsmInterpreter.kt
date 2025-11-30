@@ -8,9 +8,11 @@ import java.nio.file.Path
 class KotlinToAsmInterpreter(
     private val dialect: IsaDialect
 ) {
+    private val emitter = AsmEmitter()
+
     fun interpret(ktFile: KtFile): List<ASM> {
-        val emitter = AsmEmitter()
-        KtFileTranslator(emitter, dialect).translate(ktFile)
+        val translator = KtFileTranslator(emitter, dialect)
+        translator.translate(ktFile)
         return emitter.instructions
     }
 

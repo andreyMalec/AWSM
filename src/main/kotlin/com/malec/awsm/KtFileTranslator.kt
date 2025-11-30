@@ -1,6 +1,7 @@
 package com.malec.awsm
 
 import com.malec.awsm.expression.ExpressionTranslator
+import com.malec.awsm.expression.Operand
 import com.malec.awsm.expression.Operation
 import com.malec.awsm.isa.IsaDialect
 import org.jetbrains.kotlin.lexer.KtTokens
@@ -33,9 +34,9 @@ internal class KtFileTranslator(
                     val initializer = statement.initializer ?: error("Initializer required")
                     expressionTranslator.assign(symbol, initializer)
                 }
-
                 is KtBinaryExpression -> handleBinary(statement, symbolTable, expressionTranslator)
                 is KtUnaryExpression -> handleUnary(statement, symbolTable, expressionTranslator)
+                is KtCallExpression -> handleCall(statement, expressionTranslator)
                 else -> error("Unsupported statement: ${statement.text}")
             }
         }
@@ -76,5 +77,30 @@ internal class KtFileTranslator(
             else -> error("Unsupported unary op: ${expression.text}")
         }
         translator.increment(symbol, delta)
+    }
+
+    private fun handleCall(
+        expression: KtCallExpression,
+        translator: ExpressionTranslator
+    ) {
+        when ((expression.calleeExpression as? KtNameReferenceExpression)?.getReferencedName()) {
+            "output" -> {
+                val argument = expression.valueArguments.singleOrNull()?.getArgumentExpression()
+                    ?: error("output requires an argument")
+                val operand = translator.resolveOperand(argument)
+                val outRegister = dialect.specialRegisters.custom["out"]
+                    ?: error("ISA does not define an output register")
+                when (operand) {
+                    is Operand.Variable ->
+                        emitter.emit(dialect.instruction("mov", listOf(outRegister, operand.symbol.register)))
+                    is Operand.Constant -> {
+                        val temp = translator.symbols.declare("__output_const_${argument.hashCode()}", true)
+                        translator.assign(temp, argument)
+                        emitter.emit(dialect.instruction("mov", listOf(outRegister, temp.register)))
+                    }
+                }
+            }
+            else -> error("Unsupported call: ${expression.text}")
+        }
     }
 }
