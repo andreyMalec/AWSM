@@ -2,7 +2,7 @@ package com.malec.awsm.isa
 
 import com.malec.awsm.ASM
 import com.malec.awsm.Argument
-import java.util.Locale
+import java.util.*
 
 /**
  * Represents a parsed ISA specification with its field definitions and instruction syntax metadata.
@@ -34,6 +34,7 @@ data class IsaDialect(
         val zero: Argument.Register?,
         val stackPointer: Argument.Register?,
         val flags: Argument.Register?,
+        val immediate: Argument.Register?,
         val custom: Map<String, Argument.Register>
     )
 
@@ -42,6 +43,32 @@ data class IsaDialect(
         registerEntries.forEach { (symbol, entry) ->
             put(symbol.lowercase(Locale.ENGLISH), Argument.Register(entry.symbol, entry.bits))
         }
+    }
+    private val instructionsByName: Map<String, List<InstructionDefinition>> = instructions.mapKeys { it.key.lowercase(Locale.ENGLISH) }
+    private val immediateLoadDefinition: InstructionDefinition? = instructionsByName.values
+        .flatten()
+        .firstOrNull { definition ->
+            definition.operands.size == 1 && definition.operands.first().isImmediateOnly()
+        }
+    private val reservedRegisterNames: Set<String> = buildSet {
+        registerPreferences.lhs?.let { add(it.name.lowercase(Locale.ENGLISH)) }
+        registerPreferences.rhs?.let { add(it.name.lowercase(Locale.ENGLISH)) }
+        registerPreferences.result?.let { add(it.name.lowercase(Locale.ENGLISH)) }
+        specialRegisters.zero?.let { add(it.name.lowercase(Locale.ENGLISH)) }
+        specialRegisters.stackPointer?.let { add(it.name.lowercase(Locale.ENGLISH)) }
+        specialRegisters.flags?.let { add(it.name.lowercase(Locale.ENGLISH)) }
+        specialRegisters.immediate?.let { add(it.name.lowercase(Locale.ENGLISH)) }
+        specialRegisters.custom.values.forEach { add(it.name.lowercase(Locale.ENGLISH)) }
+    }
+
+    fun registers(): List<Argument.Register> = registerCache
+        .filterKeys { it !in reservedRegisterNames }
+        .values
+        .toList()
+
+    fun immediateLoad(value: Argument): ASM.Instruction? {
+        val definition = immediateLoadDefinition ?: return null
+        return instruction(definition.name, listOf(value))
     }
 
     fun register(name: String): Argument.Register {
@@ -55,13 +82,12 @@ data class IsaDialect(
             ?: throw IllegalStateException("Dialect '$name' does not define general-purpose registers")
     }
 
-    fun registers(): List<Argument.Register> = registerCache.values.toList()
-
     fun instruction(name: String, operands: List<Argument>): ASM.Instruction {
-        val signature = instructions[name.lowercase(Locale.ENGLISH)]
-            ?: throw IllegalArgumentException("Instruction '$name' is not defined in dialect '$name'")
+        val normalized = name.lowercase(Locale.ENGLISH)
+        val signature = instructionsByName[normalized]
+            ?: throw IllegalArgumentException("Instruction '$name' is not defined in dialect '${this.name}'")
         val definition = signature.firstOrNull { it.matches(operands) }
-            ?: throw IllegalArgumentException("No overload of '$name' matches operands ${operands.joinToString()} in dialect '$name'")
+            ?: throw IllegalArgumentException("No overload of '$name' matches operands ${operands.joinToString()} in dialect '${this.name}'")
         val mapping = linkedMapOf<Char, Argument>()
         definition.operands.forEachIndexed { index, operandDefinition ->
             mapping[operandDefinition.placeholder] = operands.getOrNull(index)
@@ -69,6 +95,11 @@ data class IsaDialect(
         }
         return ASM.Instruction(definition, mapping)
     }
+
+    fun hasInstruction(name: String): Boolean = instructionsByName.containsKey(name.lowercase(Locale.ENGLISH))
+
+    fun instructionDefinitions(name: String): List<InstructionDefinition> =
+        instructionsByName[name.lowercase(Locale.ENGLISH)] ?: emptyList()
 
     data class FieldDefinition(
         val name: String,
@@ -108,6 +139,11 @@ data class IsaDialect(
                         else -> true
                     }
                 }
+            }
+
+            fun isImmediateOnly(): Boolean = fields.isNotEmpty() && fields.all { field ->
+                val lower = field.lowercase(Locale.ENGLISH)
+                lower == "immediate" || lower == "label"
             }
         }
 

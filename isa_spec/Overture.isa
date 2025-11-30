@@ -15,6 +15,9 @@ lhs = r1
 rhs = r2
 result = r3
 
+[special_registers]
+immediate = r0
+
 [instructions]
 
 im %b(immediate|label)
@@ -41,7 +44,7 @@ sub
 01000101
 Subs r2 from r1, stores in r3.
 
-mov %a(register), %b(register)
+mov %b(register), %a(register)
 10aaabbb
 Moves from %a to %b.
 

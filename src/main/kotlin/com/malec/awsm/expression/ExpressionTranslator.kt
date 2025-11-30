@@ -1,10 +1,12 @@
 package com.malec.awsm.expression
 
-import com.malec.awsm.*
+import com.malec.awsm.Argument
+import com.malec.awsm.AsmEmitter
+import com.malec.awsm.Symbol
+import com.malec.awsm.SymbolTable
 import com.malec.awsm.isa.IsaDialect
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
-import kotlin.math.abs
 
 internal class ExpressionTranslator(
     internal val symbols: SymbolTable,
@@ -39,8 +41,8 @@ internal class ExpressionTranslator(
 
     private fun copyVariable(target: Symbol, reference: KtNameReferenceExpression) {
         val source = symbols.require(reference.getReferencedName())
-        loadToRegister(source, resultRegister)
-        storeRegister(target, resultRegister)
+        move(source.register, resultRegister)
+        move(resultRegister, target.register)
     }
 
     private fun assignBinaryExpression(target: Symbol, expression: KtBinaryExpression) {
@@ -51,59 +53,18 @@ internal class ExpressionTranslator(
         }
         val left = resolveOperand(expression.left?.unwrapParentheses())
         val right = resolveOperand(expression.right?.unwrapParentheses())
-        when {
-            left is Operand.Constant && right is Operand.Constant -> {
-                val result = if (operation == Operation.ADD) left.value + right.value else left.value - right.value
-                emitConstantStore(target, result)
-            }
-            left is Operand.Variable && right is Operand.Variable -> {
-                loadToRegister(left.symbol, leftRegister)
-                loadToRegister(right.symbol, rightRegister)
-                emitBinaryOp(operation, resultRegister, leftRegister, rightRegister)
-                storeRegister(target, resultRegister)
-            }
-            left is Operand.Variable && right is Operand.Constant -> {
-                loadToRegister(left.symbol, resultRegister)
-                emitBinaryOp(operation, resultRegister, resultRegister, right.value.toArgument())
-                storeRegister(target, resultRegister)
-            }
-            left is Operand.Constant && right is Operand.Variable -> {
-                when (operation) {
-                    Operation.ADD -> {
-                        loadToRegister(right.symbol, resultRegister)
-                        emitBinaryOp(Operation.ADD, resultRegister, resultRegister, left.value.toArgument())
-                    }
-                    Operation.SUB -> {
-                        emitConstantLoad(left.value, leftRegister)
-                        loadToRegister(right.symbol, rightRegister)
-                        emitBinaryOp(Operation.SUB, resultRegister, leftRegister, rightRegister)
-                    }
-                }
-                storeRegister(target, resultRegister)
-            }
-            else -> unsupported(expression)
-        }
+        executeBinaryOperation(left, right, target, operation)
     }
 
     fun augmentedAssignment(target: Symbol, valueExpression: KtExpression, operation: Operation) {
         val operand = resolveOperand(valueExpression)
-        loadToRegister(target, resultRegister)
-        when (operand) {
-            is Operand.Constant -> emitBinaryOp(operation, resultRegister, resultRegister, operand.value.toArgument())
-            is Operand.Variable -> {
-                loadToRegister(operand.symbol, rightRegister)
-                emitBinaryOp(operation, resultRegister, resultRegister, rightRegister)
-            }
-        }
-        storeRegister(target, resultRegister)
+        executeBinaryOperation(Operand.Variable(target), operand, target, operation)
     }
 
     fun increment(variable: Symbol, delta: Int) {
-        loadToRegister(variable, resultRegister)
-        val operation = if (delta >= 0) Operation.ADD else Operation.SUB
-        val magnitude = abs(delta)
-        emitBinaryOp(operation, resultRegister, resultRegister, magnitude.toArgument())
-        storeRegister(variable, resultRegister)
+        val operand = if (delta >= 0) Operand.Constant(delta) else Operand.Constant(-delta)
+        val op = if (delta >= 0) Operation.ADD else Operation.SUB
+        executeBinaryOperation(Operand.Variable(variable), operand, variable, op)
     }
 
     private fun resolveOperand(expression: KtExpression?): Operand {
@@ -116,28 +77,75 @@ internal class ExpressionTranslator(
     }
 
     private fun emitConstantStore(target: Symbol, value: Int) {
-        emitConstantLoad(value, resultRegister)
-        storeRegister(target, resultRegister)
+        emitConstantLoad(value, target.register)
     }
 
     private fun emitConstantLoad(value: Int, register: Argument.Register) {
-        emitter.emit(dialect.instruction("mov", listOf(register, Argument.Immediate(value))))
-    }
-
-    private fun loadToRegister(symbol: Symbol, register: Argument.Register) {
-        emitter.emit(dialect.instruction("load", listOf(register, symbol.address)))
-    }
-
-    private fun storeRegister(target: Symbol, register: Argument.Register) {
-        emitter.emit(dialect.instruction("store", listOf(target.address, register)))
-    }
-
-    private fun emitBinaryOp(operation: Operation, destination: Argument.Register, a: Argument.Register, b: Argument) {
-        val instructionName = when (operation) {
-            Operation.ADD -> "add"
-            Operation.SUB -> "sub"
+        val immediateInstruction = dialect.immediateLoad(Argument.Immediate(value))
+        if (immediateInstruction != null) {
+            emitter.emit(immediateInstruction)
+            val immediateRegister = dialect.specialRegisters.immediate
+            if (immediateRegister != null && immediateRegister != register) {
+                move(immediateRegister, register)
+            }
+            return
         }
-        emitter.emit(dialect.instruction(instructionName, listOf(destination, a, b)))
+        val immediateRegister = dialect.specialRegisters.immediate ?: register
+        val loadRegister = if (immediateRegister == register) register else immediateRegister
+        emitter.emit(dialect.instruction("mov", listOf(loadRegister, Argument.Immediate(value))))
+        if (loadRegister != register) {
+            move(loadRegister, register)
+        }
+    }
+
+    private fun move(src: Argument.Register, dst: Argument.Register) {
+        if (src == dst) return
+        emitter.emit(dialect.instruction("mov", listOf(dst, src)))
+    }
+
+    private fun emitBinaryOp(operation: Operation) {
+        val instructionName = instructionNameFor(operation)
+        val definitions = dialect.instructionDefinitions(instructionName)
+        val fixedForm = definitions.any { it.operands.isEmpty() }
+        if (fixedForm) {
+            emitter.emit(dialect.instruction(instructionName, emptyList()))
+        } else {
+            emitter.emit(dialect.instruction(instructionName, listOf(resultRegister, leftRegister, rightRegister)))
+        }
+    }
+
+    private fun executeBinaryOperation(left: Operand, right: Operand, target: Symbol, operation: Operation) {
+        if (left is Operand.Constant && right is Operand.Constant) {
+            val result = if (operation == Operation.ADD) left.value + right.value else left.value - right.value
+            emitConstantStore(target, result)
+            return
+        }
+        val instructionName = instructionNameFor(operation)
+        val definitions = dialect.instructionDefinitions(instructionName)
+        val fixedForm = definitions.any { it.operands.isEmpty() }
+        if (fixedForm) {
+            loadOperandIntoRegister(left, leftRegister)
+            loadOperandIntoRegister(right, rightRegister)
+            emitBinaryOp(operation)
+            move(resultRegister, target.register)
+        } else {
+            loadOperandIntoRegister(left, resultRegister)
+            loadOperandIntoRegister(right, rightRegister)
+            emitBinaryOp(operation)
+            move(resultRegister, target.register)
+        }
+    }
+
+    private fun loadOperandIntoRegister(operand: Operand, register: Argument.Register) {
+        when (operand) {
+            is Operand.Variable -> move(operand.symbol.register, register)
+            is Operand.Constant -> emitConstantLoad(operand.value, register)
+        }
+    }
+
+    private fun instructionNameFor(operation: Operation): String = when (operation) {
+        Operation.ADD -> "add"
+        Operation.SUB -> "sub"
     }
 
     private fun unsupported(element: KtExpression): Nothing {

@@ -20,8 +20,10 @@ internal class KotlinToAsmInterpreterTest : KotlinPsiTest() {
         val interpreter = KotlinToAsmInterpreter.fromSpecFile(Path.of("isa_spec/Overture.isa"))
         val asm = interpreter.interpret(ktFile)
         println("===== ASM =====")
-        println(asm.joinToString { "\n$it" })
-        println("===== FILTERED ASM =====")
+        asm.forEach {
+            println(it)
+        }
+        println("===== ASM =====")
         assertThat(asm.filterNot { it is ASM.Label }).isNotEmpty
     }
 }

@@ -16,7 +16,8 @@ internal class KtFileTranslator(
 
     private fun translateFunction(function: KtNamedFunction) {
         val name = function.name ?: return
-        val symbolTable = SymbolTable()
+        val registerPool = RegisterPool(dialect.registers())
+        val symbolTable = SymbolTable(registerPool)
         val expressionTranslator = ExpressionTranslator(symbolTable, emitter, dialect)
         emitter.label(name)
         val body = function.bodyExpression ?: return
@@ -32,14 +33,17 @@ internal class KtFileTranslator(
                     val initializer = statement.initializer ?: error("Initializer required")
                     expressionTranslator.assign(symbol, initializer)
                 }
+
                 is KtBinaryExpression -> handleBinary(statement, symbolTable, expressionTranslator)
                 is KtUnaryExpression -> handleUnary(statement, symbolTable, expressionTranslator)
                 else -> error("Unsupported statement: ${statement.text}")
             }
         }
         emitter.label(nextLabel())
-        emitter.emit(dialect.instruction("ret", emptyList()))
-        emitter.label(nextLabel())
+        if (dialect.hasInstruction("ret")) {
+            emitter.emit(dialect.instruction("ret", emptyList()))
+            emitter.label(nextLabel())
+        }
     }
 
     private fun handleBinary(
