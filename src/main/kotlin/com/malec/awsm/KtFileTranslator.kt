@@ -160,20 +160,29 @@ internal class KtFileTranslator(
         translator: ExpressionTranslator,
         exitLabel: String
     ) {
-        require(condition is KtBinaryExpression) { "Only binary conditions are supported" }
-        val left = condition.left ?: error("Condition missing left operand")
-        val right = condition.right ?: error("Condition missing right operand")
-        translator.emitSubtraction(left, right)
-        translator.emitMoveToLabel(Argument.Label(exitLabel))
-        val jumpInstruction = when (condition.operationToken) {
-            KtTokens.EXCLEQ -> "je"
-            KtTokens.EQEQ -> "jne"
-            KtTokens.LT -> "jae"
-            KtTokens.LTEQ -> "ja"
-            KtTokens.GT -> "jbe"
-            KtTokens.GTEQ -> "jb"
-            else -> error("Unsupported loop condition: ${condition.text}")
+        if (condition is KtBinaryExpression) {
+            val left = condition.left ?: error("Condition missing left operand")
+            val right = condition.right ?: error("Condition missing right operand")
+            translator.emitSubtraction(left, right)
+            translator.emitMoveToLabel(Argument.Label(exitLabel))
+            val jumpInstruction = when (condition.operationToken) {
+                KtTokens.EXCLEQ -> "je"
+                KtTokens.EQEQ -> "jne"
+                KtTokens.LT -> "jae"
+                KtTokens.LTEQ -> "ja"
+                KtTokens.GT -> "jbe"
+                KtTokens.GTEQ -> "jb"
+                else -> error("Unsupported loop condition: ${condition.text}")
+            }
+            emitter.emit(dialect.instruction(jumpInstruction, emptyList()))
+        } else if (condition is KtConstantExpression) {
+            val valueText = condition.text
+            if (valueText != true.toString()) {
+                translator.emitMoveToLabel(Argument.Label(exitLabel))
+                emitter.emit(dialect.instruction("jmp", emptyList()))
+            }
+        } else {
+            error("Unsupported loop condition: ${condition?.text}")
         }
-        emitter.emit(dialect.instruction(jumpInstruction, emptyList()))
     }
 }
