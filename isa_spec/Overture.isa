@@ -10,6 +10,11 @@ r5 101
 in 110
 out 110
 
+[register_prefs]
+lhs = r1
+rhs = r2
+result = r3
+
 [instructions]
 
 im %b(immediate|label)

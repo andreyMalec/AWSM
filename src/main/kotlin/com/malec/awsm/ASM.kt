@@ -9,7 +9,7 @@ sealed interface ASM {
 
     data class Instruction(
         val definition: IsaDialect.InstructionDefinition,
-        val operands: LinkedHashMap<String, Argument>
+        val operands: LinkedHashMap<Char, Argument>
     ) : ASM {
         val name: String get() = definition.name
 

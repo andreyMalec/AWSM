@@ -11,6 +11,10 @@ internal class ExpressionTranslator(
     private val emitter: AsmEmitter,
     private val dialect: IsaDialect
 ) {
+    private val resultRegister: Argument.Register = dialect.registerPreferences.result ?: dialect.anyRegister()
+    private val leftRegister: Argument.Register = dialect.registerPreferences.lhs ?: dialect.anyRegister()
+    private val rightRegister: Argument.Register = dialect.registerPreferences.rhs ?: dialect.anyRegister()
+
     fun assign(target: Symbol, expression: KtExpression) {
         when (val expr = expression.unwrapParentheses()) {
             is KtConstantExpression -> storeConstant(target, expr)
@@ -35,8 +39,8 @@ internal class ExpressionTranslator(
 
     private fun copyVariable(target: Symbol, reference: KtNameReferenceExpression) {
         val source = symbols.require(reference.getReferencedName())
-        loadToRegister(source, RESULT_REGISTER)
-        storeRegister(target, RESULT_REGISTER)
+        loadToRegister(source, resultRegister)
+        storeRegister(target, resultRegister)
     }
 
     private fun assignBinaryExpression(target: Symbol, expression: KtBinaryExpression) {
@@ -53,29 +57,29 @@ internal class ExpressionTranslator(
                 emitConstantStore(target, result)
             }
             left is Operand.Variable && right is Operand.Variable -> {
-                loadToRegister(left.symbol, LEFT_REGISTER)
-                loadToRegister(right.symbol, RIGHT_REGISTER)
-                emitBinaryOp(operation, RESULT_REGISTER, LEFT_REGISTER, RIGHT_REGISTER)
-                storeRegister(target, RESULT_REGISTER)
+                loadToRegister(left.symbol, leftRegister)
+                loadToRegister(right.symbol, rightRegister)
+                emitBinaryOp(operation, resultRegister, leftRegister, rightRegister)
+                storeRegister(target, resultRegister)
             }
             left is Operand.Variable && right is Operand.Constant -> {
-                loadToRegister(left.symbol, RESULT_REGISTER)
-                emitBinaryOp(operation, RESULT_REGISTER, RESULT_REGISTER, right.value.toArgument())
-                storeRegister(target, RESULT_REGISTER)
+                loadToRegister(left.symbol, resultRegister)
+                emitBinaryOp(operation, resultRegister, resultRegister, right.value.toArgument())
+                storeRegister(target, resultRegister)
             }
             left is Operand.Constant && right is Operand.Variable -> {
                 when (operation) {
                     Operation.ADD -> {
-                        loadToRegister(right.symbol, RESULT_REGISTER)
-                        emitBinaryOp(Operation.ADD, RESULT_REGISTER, RESULT_REGISTER, left.value.toArgument())
+                        loadToRegister(right.symbol, resultRegister)
+                        emitBinaryOp(Operation.ADD, resultRegister, resultRegister, left.value.toArgument())
                     }
                     Operation.SUB -> {
-                        emitConstantLoad(left.value, LEFT_REGISTER)
-                        loadToRegister(right.symbol, RIGHT_REGISTER)
-                        emitBinaryOp(Operation.SUB, RESULT_REGISTER, LEFT_REGISTER, RIGHT_REGISTER)
+                        emitConstantLoad(left.value, leftRegister)
+                        loadToRegister(right.symbol, rightRegister)
+                        emitBinaryOp(Operation.SUB, resultRegister, leftRegister, rightRegister)
                     }
                 }
-                storeRegister(target, RESULT_REGISTER)
+                storeRegister(target, resultRegister)
             }
             else -> unsupported(expression)
         }
@@ -83,23 +87,23 @@ internal class ExpressionTranslator(
 
     fun augmentedAssignment(target: Symbol, valueExpression: KtExpression, operation: Operation) {
         val operand = resolveOperand(valueExpression)
-        loadToRegister(target, RESULT_REGISTER)
+        loadToRegister(target, resultRegister)
         when (operand) {
-            is Operand.Constant -> emitBinaryOp(operation, RESULT_REGISTER, RESULT_REGISTER, operand.value.toArgument())
+            is Operand.Constant -> emitBinaryOp(operation, resultRegister, resultRegister, operand.value.toArgument())
             is Operand.Variable -> {
-                loadToRegister(operand.symbol, RIGHT_REGISTER)
-                emitBinaryOp(operation, RESULT_REGISTER, RESULT_REGISTER, RIGHT_REGISTER)
+                loadToRegister(operand.symbol, rightRegister)
+                emitBinaryOp(operation, resultRegister, resultRegister, rightRegister)
             }
         }
-        storeRegister(target, RESULT_REGISTER)
+        storeRegister(target, resultRegister)
     }
 
     fun increment(variable: Symbol, delta: Int) {
-        loadToRegister(variable, RESULT_REGISTER)
+        loadToRegister(variable, resultRegister)
         val operation = if (delta >= 0) Operation.ADD else Operation.SUB
         val magnitude = abs(delta)
-        emitBinaryOp(operation, RESULT_REGISTER, RESULT_REGISTER, magnitude.toArgument())
-        storeRegister(variable, RESULT_REGISTER)
+        emitBinaryOp(operation, resultRegister, resultRegister, magnitude.toArgument())
+        storeRegister(variable, resultRegister)
     }
 
     private fun resolveOperand(expression: KtExpression?): Operand {
@@ -112,8 +116,8 @@ internal class ExpressionTranslator(
     }
 
     private fun emitConstantStore(target: Symbol, value: Int) {
-        emitConstantLoad(value, RESULT_REGISTER)
-        storeRegister(target, RESULT_REGISTER)
+        emitConstantLoad(value, resultRegister)
+        storeRegister(target, resultRegister)
     }
 
     private fun emitConstantLoad(value: Int, register: Argument.Register) {
@@ -160,12 +164,6 @@ internal class ExpressionTranslator(
     }
 
     private fun Int.toArgument(): Argument = Argument.Immediate(this)
-
-    companion object {
-        private val RESULT_REGISTER = Argument.Register("r13")
-        private val LEFT_REGISTER = Argument.Register("r1")
-        private val RIGHT_REGISTER = Argument.Register("r2")
-    }
 }
 
 internal enum class Operation { ADD, SUB }

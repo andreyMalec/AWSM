@@ -11,7 +11,9 @@ data class IsaDialect(
     val name: String,
     val settings: Settings,
     val fields: Map<String, FieldDefinition>,
-    val instructions: Map<String, List<InstructionDefinition>>
+    val instructions: Map<String, List<InstructionDefinition>>,
+    val registerPreferences: RegisterPreferences,
+    val specialRegisters: SpecialRegisters
 ) {
     data class Settings(
         val variant: String?,
@@ -22,9 +24,24 @@ data class IsaDialect(
         enum class Endianness { BIG, LITTLE }
     }
 
+    data class RegisterPreferences(
+        val lhs: Argument.Register?,
+        val rhs: Argument.Register?,
+        val result: Argument.Register?
+    )
+
+    data class SpecialRegisters(
+        val zero: Argument.Register?,
+        val stackPointer: Argument.Register?,
+        val flags: Argument.Register?,
+        val custom: Map<String, Argument.Register>
+    )
+
     private val registerEntries: Map<String, FieldEntry> = fields["register"]?.entries.orEmpty()
-    private val registerCache: Map<String, Argument.Register> = registerEntries.mapValues { (symbol, entry) ->
-        Argument.Register(symbol, entry.bits)
+    private val registerCache: LinkedHashMap<String, Argument.Register> = LinkedHashMap<String, Argument.Register>().apply {
+        registerEntries.forEach { (symbol, entry) ->
+            put(symbol.lowercase(Locale.ENGLISH), Argument.Register(entry.symbol, entry.bits))
+        }
     }
 
     fun register(name: String): Argument.Register {
@@ -33,14 +50,21 @@ data class IsaDialect(
             ?: throw IllegalArgumentException("Register '$name' is not defined in dialect '$name'")
     }
 
+    fun anyRegister(): Argument.Register {
+        return registers().firstOrNull()
+            ?: throw IllegalStateException("Dialect '$name' does not define general-purpose registers")
+    }
+
+    fun registers(): List<Argument.Register> = registerCache.values.toList()
+
     fun instruction(name: String, operands: List<Argument>): ASM.Instruction {
         val signature = instructions[name.lowercase(Locale.ENGLISH)]
             ?: throw IllegalArgumentException("Instruction '$name' is not defined in dialect '$name'")
         val definition = signature.firstOrNull { it.matches(operands) }
             ?: throw IllegalArgumentException("No overload of '$name' matches operands ${operands.joinToString()} in dialect '$name'")
-        val mapping = linkedMapOf<String, Argument>()
+        val mapping = linkedMapOf<Char, Argument>()
         definition.operands.forEachIndexed { index, operandDefinition ->
-            mapping[operandDefinition.name] = operands.getOrNull(index)
+            mapping[operandDefinition.placeholder] = operands.getOrNull(index)
                 ?: error("Missing operand ${operandDefinition.name} for '$name'")
         }
         return ASM.Instruction(definition, mapping)
@@ -58,7 +82,7 @@ data class IsaDialect(
 
     data class InstructionDefinition(
         val name: String,
-        val syntaxTokens: List<SyntaxToken>,
+        val syntax: String,
         val operands: List<OperandDefinition>,
         val virtualOperands: List<VirtualOperand>,
         val assertions: List<Assertion>,
@@ -67,10 +91,12 @@ data class IsaDialect(
     ) {
         data class OperandDefinition(
             val name: String,
-            val placeholder: String,
+            val placeholder: Char,
             val size: OperandSize,
             val fields: List<String>
         ) {
+            data class OperandSize(val signed: Boolean, val bits: Int)
+
             fun accepts(argument: Argument): Boolean {
                 if (fields.isEmpty()) return true
                 return fields.any { field ->
@@ -85,30 +111,24 @@ data class IsaDialect(
             }
         }
 
-        data class OperandSize(val signed: Boolean, val bits: Int)
-
-        data class VirtualOperand(val name: String, val size: OperandSize, val expression: String)
+        data class VirtualOperand(val name: String, val size: OperandDefinition.OperandSize, val expression: String)
 
         data class Assertion(val left: String, val right: String, val message: String?)
-
-        sealed interface SyntaxToken {
-            data class Literal(val value: String) : SyntaxToken
-            data class Placeholder(val operandName: String) : SyntaxToken
-        }
 
         fun matches(arguments: List<Argument>): Boolean {
             if (operands.size != arguments.size) return false
             return operands.zip(arguments).all { (definition, argument) -> definition.accepts(argument) }
         }
 
-        fun format(arguments: Map<String, Argument>): String {
-            return syntaxTokens.joinToString(separator = " ") { token ->
-                when (token) {
-                    is SyntaxToken.Literal -> token.value
-                    is SyntaxToken.Placeholder -> arguments[token.operandName]?.toString()
-                        ?: error("Missing argument ${token.operandName}")
-                }
+        fun format(arguments: Map<Char, Argument>): String {
+            var rendered = syntax
+            operands.forEach { operand ->
+                val value = arguments[operand.placeholder]
+                    ?: error("Missing argument ${operand.name}")
+                val regex = Regex("%${operand.placeholder}\\([^)]*\\)")
+                rendered = regex.replace(rendered, value.toString())
             }
+            return rendered
         }
     }
 }
