@@ -1,9 +1,6 @@
 package com.malec.awsm.expression
 
-import com.malec.awsm.Argument
-import com.malec.awsm.AsmEmitter
-import com.malec.awsm.Symbol
-import com.malec.awsm.SymbolTable
+import com.malec.awsm.*
 import com.malec.awsm.isa.IsaDialect
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
@@ -75,7 +72,13 @@ internal class ExpressionTranslator(
             KtTokens.PLUS -> Operation.ADD
             KtTokens.MINUS -> Operation.SUB
             KtTokens.MUL -> Operation.MUL
-            else -> unsupported(expression)
+            else -> when (expression.operationReference.getReferencedName()) {
+                "and" -> Operation.AND
+                "or" -> Operation.OR
+                "nor" -> Operation.NOR
+                "nand" -> Operation.NAND
+                else -> unsupported(expression)
+            }
         }
         val left = resolveOperand(expression.left?.unwrapParentheses())
         val right = resolveOperand(expression.right?.unwrapParentheses())
@@ -165,11 +168,19 @@ internal class ExpressionTranslator(
                 Operation.ADD -> left.value + right.value
                 Operation.SUB -> left.value - right.value
                 Operation.MUL -> left.value * right.value
+                Operation.AND -> left.value and right.value
+                Operation.OR -> left.value or right.value
+                Operation.NOR -> left.value nor right.value
+                Operation.NAND -> left.value nand right.value
             }
             emitConstantStore(target, result)
             return
         }
         val instructionName = instructionNameFor(operation)
+        if (!dialect.hasInstruction(instructionName)) {
+            emitBitwiseFallback(left, right, target, operation)
+            return
+        }
         val definitions = dialect.instructionDefinitions(instructionName)
         val fixedForm = definitions.any { it.operands.isEmpty() }
         if (fixedForm) {
@@ -239,10 +250,30 @@ internal class ExpressionTranslator(
         }
     }
 
+    private fun emitBitwiseFallback(left: Operand, right: Operand, target: Symbol, operation: Operation) {
+        fun emitBitwise(opName: String) {
+            loadOperandIntoRegister(left, leftRegister)
+            loadOperandIntoRegister(right, rightRegister)
+            emitter.emit(dialect.instruction(opName, emptyList()))
+            move(resultRegister, target.register)
+        }
+        when (operation) {
+            Operation.AND -> emitBitwise("and")
+            Operation.OR -> emitBitwise("or")
+            Operation.NOR -> emitBitwise("nor")
+            Operation.NAND -> emitBitwise("nand")
+            else -> error("Unsupported fallback for $operation")
+        }
+    }
+
     private fun instructionNameFor(operation: Operation): String = when (operation) {
         Operation.ADD -> "add"
         Operation.SUB -> "sub"
         Operation.MUL -> "mul"
+        Operation.AND -> "and"
+        Operation.OR -> "or"
+        Operation.NOR -> "nor"
+        Operation.NAND -> "nand"
     }
 
     private fun unsupported(element: KtExpression): Nothing {
@@ -272,7 +303,7 @@ internal class ExpressionTranslator(
     private fun Int.toArgument(): Argument = Argument.Immediate(this)
 }
 
-internal enum class Operation { ADD, SUB, MUL }
+internal enum class Operation { ADD, SUB, MUL, AND, OR, NOR, NAND }
 
 internal sealed interface Operand {
     data class Variable(val symbol: Symbol) : Operand

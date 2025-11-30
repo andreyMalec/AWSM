@@ -30,6 +30,10 @@ add
 01000100
 Adds r1 and r2, stores in r3.
 
+nand
+01000000
+Nands r1 and r2, stores in r3.
+
 or
 01000001
 Ors r1 and r2, stores in r3.

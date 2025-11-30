@@ -9,3 +9,11 @@ fun input(): Int {
 fun output(value: Int) {
     println("Output: $value")
 }
+
+infix fun Int.nor(b: Int): Int {
+    return (this or b).inv()
+}
+
+infix fun Int.nand(b: Int): Int {
+    return (this and b).inv()
+}
