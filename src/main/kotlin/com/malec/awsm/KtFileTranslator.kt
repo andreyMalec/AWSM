@@ -88,15 +88,21 @@ internal class KtFileTranslator(
                 val argument = expression.valueArguments.singleOrNull()?.getArgumentExpression()
                     ?: error("output requires an argument")
                 val operand = translator.resolveOperand(argument)
-                val outRegister = dialect.specialRegisters.custom["out"]
+                val outRegister = dialect.specialRegisters.output
+                    ?: dialect.specialRegisters.custom["out"]
                     ?: error("ISA does not define an output register")
                 when (operand) {
-                    is Operand.Variable ->
-                        emitter.emit(dialect.instruction("mov", listOf(outRegister, operand.symbol.register)))
+                    is Operand.Variable -> {
+                        if (operand.symbol.register != outRegister) {
+                            emitter.emit(dialect.instruction("mov", listOf(outRegister, operand.symbol.register)))
+                        }
+                    }
                     is Operand.Constant -> {
                         val temp = translator.symbols.declare("__output_const_${argument.hashCode()}", true)
                         translator.assign(temp, argument)
-                        emitter.emit(dialect.instruction("mov", listOf(outRegister, temp.register)))
+                        if (temp.register != outRegister) {
+                            emitter.emit(dialect.instruction("mov", listOf(outRegister, temp.register)))
+                        }
                     }
                 }
             }

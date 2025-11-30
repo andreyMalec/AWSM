@@ -35,6 +35,8 @@ data class IsaDialect(
         val stackPointer: Argument.Register?,
         val flags: Argument.Register?,
         val immediate: Argument.Register?,
+        val input: Argument.Register?,
+        val output: Argument.Register?,
         val custom: Map<String, Argument.Register>
     )
 
@@ -58,6 +60,8 @@ data class IsaDialect(
         specialRegisters.stackPointer?.let { add(it.name.lowercase(Locale.ENGLISH)) }
         specialRegisters.flags?.let { add(it.name.lowercase(Locale.ENGLISH)) }
         specialRegisters.immediate?.let { add(it.name.lowercase(Locale.ENGLISH)) }
+        specialRegisters.input?.let { add(it.name.lowercase(Locale.ENGLISH)) }
+        specialRegisters.output?.let { add(it.name.lowercase(Locale.ENGLISH)) }
         specialRegisters.custom.values.forEach { add(it.name.lowercase(Locale.ENGLISH)) }
     }
 

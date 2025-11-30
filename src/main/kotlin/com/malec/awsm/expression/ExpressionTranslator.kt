@@ -51,7 +51,9 @@ internal class ExpressionTranslator(
             ?: error("Unsupported call")
         when (calleeName) {
             "input" -> {
-                val inRegister = dialect.specialRegisters.custom["in"]
+                val inRegister = dialect.specialRegisters.input
+                    ?: dialect.specialRegisters.custom["in"]
+                    ?: dialect.specialRegisters.immediate
                     ?: error("ISA does not define input register")
                 move(inRegister, target.register)
             }
@@ -86,12 +88,11 @@ internal class ExpressionTranslator(
         return when (expr) {
             is KtNameReferenceExpression -> Operand.Variable(symbols.require(expr.getReferencedName()))
             is KtConstantExpression -> Operand.Constant(expr.asIntConstant() ?: unsupportedExpression("Non-int constant"))
-            is KtCallExpression -> {
-                val temp = symbols.declare("__call_${expr.hashCode()}", mutable = true)
+            else -> {
+                val temp = symbols.declare("__tmp_${expr.hashCode()}", mutable = true)
                 assign(temp, expr)
                 Operand.Variable(temp)
             }
-            else -> unsupportedExpression("Unsupported operand: ${expr.text}")
         }
     }
 

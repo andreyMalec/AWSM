@@ -3,19 +3,17 @@ package com.malec.awsm.tc
 import com.malec.awsm.tc.base.TcTest
 import org.junit.Test
 
-internal class AddFiveTest : TcTest() {
+internal class AddFiveTest2 : TcTest() {
     @Test
     fun translates_variable_declarations_and_assignments() {
         val code = """
             fun main() {
-                var a = input()
-                a += 5
-                output(a)
+                output(input() + 5)
             }
         """
         val expected = """
-            mov r4, in
-            mov r1, r4
+            mov r5, in
+            mov r1, r5
             im 5
             mov r2, r0
             add
