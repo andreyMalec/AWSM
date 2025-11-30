@@ -14,4 +14,3 @@ internal class SymbolTable {
 }
 
 internal data class Symbol(val name: String, val mutable: Boolean, val address: Argument.Address)
-

@@ -2,10 +2,14 @@ package com.malec.awsm
 
 import com.malec.awsm.expression.ExpressionTranslator
 import com.malec.awsm.expression.Operation
+import com.malec.awsm.isa.IsaDialect
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
 
-internal class KtFileTranslator(private val emitter: AsmEmitter) {
+internal class KtFileTranslator(
+    private val emitter: AsmEmitter,
+    private val dialect: IsaDialect
+) {
     fun translate(file: KtFile) {
         file.declarations.filterIsInstance<KtNamedFunction>().forEach { translateFunction(it) }
     }
@@ -13,7 +17,7 @@ internal class KtFileTranslator(private val emitter: AsmEmitter) {
     private fun translateFunction(function: KtNamedFunction) {
         val name = function.name ?: return
         val symbolTable = SymbolTable()
-        val expressionTranslator = ExpressionTranslator(symbolTable, emitter)
+        val expressionTranslator = ExpressionTranslator(symbolTable, emitter, dialect)
         emitter.label(name)
         val body = function.bodyExpression ?: return
         val statements = if (body is KtBlockExpression) body.statements else listOf(body)
@@ -34,7 +38,7 @@ internal class KtFileTranslator(private val emitter: AsmEmitter) {
             }
         }
         emitter.label(nextLabel())
-        emitter.emit(ASM.RET)
+        emitter.emit(dialect.instruction("ret", emptyList()))
         emitter.label(nextLabel())
     }
 

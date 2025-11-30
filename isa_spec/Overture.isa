@@ -7,20 +7,14 @@ r2 010
 r3 011
 r4 100
 r5 101
+in 110
+out 110
 
 [instructions]
 
 im %b(immediate|label)
 00bbbbbb
 Moves %b to r0.
-
-in %a(register)
-10110aaa
-Loads an input and stores it in [a]
-
-out %a(register)
-10aaa110
-Sends [a] to output
 
 add
 01000100

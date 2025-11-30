@@ -1,13 +1,15 @@
 package com.malec.awsm.expression
 
 import com.malec.awsm.*
+import com.malec.awsm.isa.IsaDialect
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
 import kotlin.math.abs
 
 internal class ExpressionTranslator(
     internal val symbols: SymbolTable,
-    private val emitter: AsmEmitter
+    private val emitter: AsmEmitter,
+    private val dialect: IsaDialect
 ) {
     fun assign(target: Symbol, expression: KtExpression) {
         when (val expr = expression.unwrapParentheses()) {
@@ -115,23 +117,23 @@ internal class ExpressionTranslator(
     }
 
     private fun emitConstantLoad(value: Int, register: Argument.Register) {
-        emitter.emit(ASM.MOV(register, value.toArgument()))
+        emitter.emit(dialect.instruction("mov", listOf(register, Argument.Immediate(value))))
     }
 
     private fun loadToRegister(symbol: Symbol, register: Argument.Register) {
-        emitter.emit(ASM.LOAD(register, symbol.address))
+        emitter.emit(dialect.instruction("load", listOf(register, symbol.address)))
     }
 
     private fun storeRegister(target: Symbol, register: Argument.Register) {
-        emitter.emit(ASM.STORE(target.address, register))
+        emitter.emit(dialect.instruction("store", listOf(target.address, register)))
     }
 
     private fun emitBinaryOp(operation: Operation, destination: Argument.Register, a: Argument.Register, b: Argument) {
-        val instruction = when (operation) {
-            Operation.ADD -> ASM.ADD(destination, a, b)
-            Operation.SUB -> ASM.SUB(destination, a, b)
+        val instructionName = when (operation) {
+            Operation.ADD -> "add"
+            Operation.SUB -> "sub"
         }
-        emitter.emit(instruction)
+        emitter.emit(dialect.instruction(instructionName, listOf(destination, a, b)))
     }
 
     private fun unsupported(element: KtExpression): Nothing {
@@ -157,12 +159,12 @@ internal class ExpressionTranslator(
         }
     }
 
-    private fun Int.toArgument(): Argument.Value.Number = Argument.Value.Number(this)
+    private fun Int.toArgument(): Argument = Argument.Immediate(this)
 
     companion object {
-        private val RESULT_REGISTER = Argument.Register.R13
-        private val LEFT_REGISTER = Argument.Register.R1
-        private val RIGHT_REGISTER = Argument.Register.R2
+        private val RESULT_REGISTER = Argument.Register("r13")
+        private val LEFT_REGISTER = Argument.Register("r1")
+        private val RIGHT_REGISTER = Argument.Register("r2")
     }
 }
 

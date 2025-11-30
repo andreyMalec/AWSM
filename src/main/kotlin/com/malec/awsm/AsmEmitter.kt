@@ -5,11 +5,10 @@ internal class AsmEmitter {
     val instructions: List<ASM> get() = _instructions
 
     fun label(name: String) {
-        _instructions.add(ASM.LABEL(name))
+        _instructions.add(ASM.Label(name))
     }
 
     fun emit(instruction: ASM) {
         _instructions.add(instruction)
     }
 }
-
