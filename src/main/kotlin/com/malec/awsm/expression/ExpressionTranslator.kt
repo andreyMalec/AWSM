@@ -109,6 +109,14 @@ internal class ExpressionTranslator(
         }
     }
 
+    fun emitMoveToLabel(value: Argument.Label) {
+        val immediateInstruction = dialect.immediateLoad(value)
+        if (immediateInstruction != null) {
+            emitter.emit(immediateInstruction)
+            return
+        }
+    }
+
     private fun emitConstantStore(target: Symbol, value: Int) {
         emitConstantLoad(value, target.register)
     }
@@ -175,6 +183,19 @@ internal class ExpressionTranslator(
             emitBinaryOp(operation)
             move(resultRegister, target.register)
         }
+    }
+
+    fun emitSubtraction(leftExpression: KtExpression?, rightExpression: KtExpression?) {
+        val leftOperand = resolveOperand(leftExpression)
+        val rightOperand = resolveOperand(rightExpression)
+        loadOperandIntoRegister(leftOperand, leftRegister)
+        loadOperandIntoRegister(rightOperand, rightRegister)
+        emitBinaryOp(Operation.SUB)
+    }
+
+    fun loadOperandInto(register: Argument.Register, expression: KtExpression) {
+        val operand = resolveOperand(expression)
+        loadOperandIntoRegister(operand, register)
     }
 
     private fun emitMultiplicationByAddition(left: Operand, right: Operand, target: Symbol) {

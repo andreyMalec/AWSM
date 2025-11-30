@@ -27,23 +27,33 @@ internal class KtFileTranslator(
         fun nextLabel(): String = "L${labelIndex++}_${name}"
         statements.forEach { statement ->
             emitter.label(nextLabel())
-            when (statement) {
-                is KtProperty -> {
-                    val declaredName = statement.name ?: return@forEach
-                    val symbol = symbolTable.declare(declaredName, statement.isVar)
-                    val initializer = statement.initializer ?: error("Initializer required")
-                    expressionTranslator.assign(symbol, initializer)
-                }
-                is KtBinaryExpression -> handleBinary(statement, symbolTable, expressionTranslator)
-                is KtUnaryExpression -> handleUnary(statement, symbolTable, expressionTranslator)
-                is KtCallExpression -> handleCall(statement, expressionTranslator)
-                else -> error("Unsupported statement: ${statement.text}")
-            }
+            handleStatement(statement, symbolTable, expressionTranslator, ::nextLabel)
         }
         emitter.label(nextLabel())
         if (dialect.hasInstruction("ret")) {
             emitter.emit(dialect.instruction("ret", emptyList()))
             emitter.label(nextLabel())
+        }
+    }
+
+    private fun handleStatement(
+        statement: KtExpression,
+        symbols: SymbolTable,
+        translator: ExpressionTranslator,
+        nextLabel: () -> String
+    ) {
+        when (statement) {
+            is KtProperty -> {
+                val declaredName = statement.name ?: return
+                val symbol = symbols.declare(declaredName, statement.isVar)
+                val initializer = statement.initializer ?: error("Initializer required")
+                translator.assign(symbol, initializer)
+            }
+            is KtBinaryExpression -> handleBinary(statement, symbols, translator)
+            is KtUnaryExpression -> handleUnary(statement, symbols, translator)
+            is KtCallExpression -> handleCall(statement, translator)
+            is KtWhileExpression -> handleWhile(statement, symbols, translator, nextLabel)
+            else -> error("Unsupported statement: ${statement.text}")
         }
     }
 
@@ -92,21 +102,50 @@ internal class KtFileTranslator(
                 val outRegister = dialect.specialRegisters.output
                     ?: error("ISA does not define an output register")
                 when (operand) {
-                    is Operand.Variable -> {
-                        if (operand.symbol.register != outRegister) {
-                            emitter.emit(dialect.instruction("mov", listOf(outRegister, operand.symbol.register)))
-                        }
-                    }
+                    is Operand.Variable ->
+                        emitter.emit(dialect.instruction("mov", listOf(outRegister, operand.symbol.register)))
                     is Operand.Constant -> {
                         val temp = translator.symbols.declare("__output_const_${argument.hashCode()}", true)
                         translator.assign(temp, argument)
-                        if (temp.register != outRegister) {
-                            emitter.emit(dialect.instruction("mov", listOf(outRegister, temp.register)))
-                        }
+                        emitter.emit(dialect.instruction("mov", listOf(outRegister, temp.register)))
                     }
                 }
             }
             else -> error("Unsupported call: ${expression.text}")
         }
+    }
+
+    private fun handleWhile(
+        expression: KtWhileExpression,
+        symbols: SymbolTable,
+        translator: ExpressionTranslator,
+        nextLabel: () -> String
+    ) {
+        val loopLabel = nextLabel()
+        val exitLabel = nextLabel()
+        emitter.label(loopLabel)
+        val condition = expression.condition ?: error("while requires condition")
+        val conditionExpression = condition as? KtBinaryExpression
+            ?: error("Only binary conditions are supported")
+        val left = conditionExpression.left ?: error("Condition missing left operand")
+        val right = conditionExpression.right ?: error("Condition missing right operand")
+        translator.emitSubtraction(left, right)
+        translator.emitMoveToLabel( Argument.Label(exitLabel))
+        val jumpInstruction = when (conditionExpression.operationToken) {
+            KtTokens.EXCLEQ -> "je"
+            KtTokens.EQEQ -> "jne"
+            KtTokens.LT -> "jae"
+            KtTokens.LTEQ -> "ja"
+            KtTokens.GT -> "jbe"
+            KtTokens.GTEQ -> "jb"
+            else -> error("Unsupported loop condition: ${conditionExpression.text}")
+        }
+        emitter.emit(dialect.instruction(jumpInstruction, emptyList()))
+        val body = expression.body ?: return
+        val bodyStatements = if (body is KtBlockExpression) body.statements else listOf(body)
+        bodyStatements.forEach { handleStatement(it, symbols, translator, nextLabel) }
+        translator.emitMoveToLabel( Argument.Label(loopLabel))
+        emitter.emit(dialect.instruction("jmp", emptyList()))
+        emitter.label(exitLabel)
     }
 }
