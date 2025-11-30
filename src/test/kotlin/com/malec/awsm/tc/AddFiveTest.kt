@@ -17,6 +17,15 @@ internal class AddFiveTest : KotlinPsiTest() {
                 output(a)
             }
         """
+        val expected = """
+            mov r4, in
+            mov r1, r4
+            im 5
+            mov r2, r0
+            add
+            mov r4, r3
+            mov out, r4
+        """.trimIndent()
         val ktFile = parseFile(code)
         val interpreter = KotlinToAsmInterpreter.Companion.fromSpecFile(Path.of("isa_spec/Overture.isa"))
         val asm = interpreter.interpret(ktFile)
@@ -25,6 +34,25 @@ internal class AddFiveTest : KotlinPsiTest() {
             println(it)
         }
         println("===== ASM =====")
-        assertThat(asm.filterNot { it is ASM.Label }).isNotEmpty
+        val filtered = asm.filterNot { it is ASM.Label }
+        assertThat(filtered).isNotEmpty
+
+        val actual = filtered.map { it.toString().trim() }
+        val expectedList = expected
+            .lines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+
+        assertThat(actual.size)
+            .withFailMessage("Instruction count mismatch: expected ${expectedList.size}, but was ${actual.size}")
+            .isEqualTo(expectedList.size)
+
+        expectedList.forEachIndexed { index, expectedInstruction ->
+            assertThat(actual[index])
+                .withFailMessage(
+                    "Instruction mismatch at line ${index + 1}: expected '$expectedInstruction' but was '${actual[index]}'"
+                )
+                .isEqualTo(expectedInstruction)
+        }
     }
 }
