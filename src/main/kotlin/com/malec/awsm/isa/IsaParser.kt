@@ -121,14 +121,7 @@ class IsaParser {
             flags = resolveRegister(specialRegistersMap["flags"]),
             immediate = resolveRegister(specialRegistersMap["immediate"]),
             input = resolveRegister(specialRegistersMap["in"]),
-            output = resolveRegister(specialRegistersMap["out"]),
-            custom = specialRegistersMap
-                .filterKeys { it !in setOf("zr", "sp", "flags", "immediate", "in", "out") }
-                .mapNotNull { (key, value) ->
-                    val register = resolveRegister(value)
-                    if (register != null) key to register else null
-                }
-                .toMap()
+            output = resolveRegister(specialRegistersMap["out"])
         )
         return IsaDialect(
             name = name,

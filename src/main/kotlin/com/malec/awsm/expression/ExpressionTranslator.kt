@@ -7,6 +7,7 @@ import com.malec.awsm.SymbolTable
 import com.malec.awsm.isa.IsaDialect
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
+import kotlin.math.abs
 
 internal class ExpressionTranslator(
     internal val symbols: SymbolTable,
@@ -52,11 +53,19 @@ internal class ExpressionTranslator(
         when (calleeName) {
             "input" -> {
                 val inRegister = dialect.specialRegisters.input
-                    ?: dialect.specialRegisters.custom["in"]
                     ?: dialect.specialRegisters.immediate
                     ?: error("ISA does not define input register")
-                move(inRegister, target.register)
+                val targetRegister = target.register
+                move(inRegister, targetRegister)
             }
+
+            "output" -> {
+                val outRegister = dialect.specialRegisters.output
+                    ?: error("ISA does not define an output register")
+                val targetRegister = target.register
+                move(outRegister, targetRegister)
+            }
+
             else -> error("Unsupported call: ${expression.text}")
         }
     }
@@ -65,6 +74,7 @@ internal class ExpressionTranslator(
         val operation = when (expression.operationToken) {
             KtTokens.PLUS -> Operation.ADD
             KtTokens.MINUS -> Operation.SUB
+            KtTokens.MUL -> Operation.MUL
             else -> unsupported(expression)
         }
         val left = resolveOperand(expression.left?.unwrapParentheses())
@@ -87,7 +97,10 @@ internal class ExpressionTranslator(
         val expr = expression?.unwrapParentheses() ?: unsupportedExpression("Missing operand")
         return when (expr) {
             is KtNameReferenceExpression -> Operand.Variable(symbols.require(expr.getReferencedName()))
-            is KtConstantExpression -> Operand.Constant(expr.asIntConstant() ?: unsupportedExpression("Non-int constant"))
+            is KtConstantExpression -> Operand.Constant(
+                expr.asIntConstant() ?: unsupportedExpression("Non-int constant")
+            )
+
             else -> {
                 val temp = symbols.declare("__tmp_${expr.hashCode()}", mutable = true)
                 assign(temp, expr)
@@ -135,8 +148,16 @@ internal class ExpressionTranslator(
     }
 
     private fun executeBinaryOperation(left: Operand, right: Operand, target: Symbol, operation: Operation) {
+        if (operation == Operation.MUL && !dialect.hasInstruction("mul")) {
+            emitMultiplicationByAddition(left, right, target)
+            return
+        }
         if (left is Operand.Constant && right is Operand.Constant) {
-            val result = if (operation == Operation.ADD) left.value + right.value else left.value - right.value
+            val result = when (operation) {
+                Operation.ADD -> left.value + right.value
+                Operation.SUB -> left.value - right.value
+                Operation.MUL -> left.value * right.value
+            }
             emitConstantStore(target, result)
             return
         }
@@ -156,7 +177,41 @@ internal class ExpressionTranslator(
         }
     }
 
+    private fun emitMultiplicationByAddition(left: Operand, right: Operand, target: Symbol) {
+        val (multiplicandOperand, multiplierOperand) = when {
+            left is Operand.Variable && right is Operand.Constant -> left to right
+            left is Operand.Constant && right is Operand.Variable -> right to left
+            else -> unsupportedExpression("Multiplication requires at least one constant operand when 'mul' instruction missing")
+        }
+        val multiplicandRegister = ensureOperandInDedicatedRegister(multiplicandOperand, target)
+        emitConstantLoad(0, resultRegister)
+        val multiplier = multiplierOperand.value
+        if (multiplier == 0) return
+        val iterations = abs(multiplier)
+        repeat(iterations) {
+            move(multiplicandRegister, leftRegister)
+            move(resultRegister, rightRegister)
+            emitBinaryOp(Operation.ADD)
+        }
+        move(resultRegister, target.register)
+    }
+
+    private fun ensureOperandInDedicatedRegister(operand: Operand, target: Symbol): Argument.Register {
+        return when (operand) {
+            is Operand.Variable -> operand.symbol.register
+            is Operand.Constant -> {
+                val tempRegister = symbols.acquireRegister()
+                emitConstantLoad(operand.value, tempRegister)
+                tempRegister
+            }
+        }
+    }
+
     private fun loadOperandIntoRegister(operand: Operand, register: Argument.Register) {
+        moveOperandIntoRegister(operand, register)
+    }
+
+    private fun moveOperandIntoRegister(operand: Operand, register: Argument.Register) {
         when (operand) {
             is Operand.Variable -> move(operand.symbol.register, register)
             is Operand.Constant -> emitConstantLoad(operand.value, register)
@@ -166,6 +221,7 @@ internal class ExpressionTranslator(
     private fun instructionNameFor(operation: Operation): String = when (operation) {
         Operation.ADD -> "add"
         Operation.SUB -> "sub"
+        Operation.MUL -> "mul"
     }
 
     private fun unsupported(element: KtExpression): Nothing {
@@ -187,6 +243,7 @@ internal class ExpressionTranslator(
                     else -> null
                 }
             }
+
             else -> null
         }
     }
@@ -194,7 +251,7 @@ internal class ExpressionTranslator(
     private fun Int.toArgument(): Argument = Argument.Immediate(this)
 }
 
-internal enum class Operation { ADD, SUB }
+internal enum class Operation { ADD, SUB, MUL }
 
 internal sealed interface Operand {
     data class Variable(val symbol: Symbol) : Operand

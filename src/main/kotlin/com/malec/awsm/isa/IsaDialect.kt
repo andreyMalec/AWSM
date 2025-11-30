@@ -36,8 +36,7 @@ data class IsaDialect(
         val flags: Argument.Register?,
         val immediate: Argument.Register?,
         val input: Argument.Register?,
-        val output: Argument.Register?,
-        val custom: Map<String, Argument.Register>
+        val output: Argument.Register?
     )
 
     private val registerEntries: Map<String, FieldEntry> = fields["register"]?.entries.orEmpty()
@@ -62,7 +61,6 @@ data class IsaDialect(
         specialRegisters.immediate?.let { add(it.name.lowercase(Locale.ENGLISH)) }
         specialRegisters.input?.let { add(it.name.lowercase(Locale.ENGLISH)) }
         specialRegisters.output?.let { add(it.name.lowercase(Locale.ENGLISH)) }
-        specialRegisters.custom.values.forEach { add(it.name.lowercase(Locale.ENGLISH)) }
     }
 
     fun registers(): List<Argument.Register> = registerCache

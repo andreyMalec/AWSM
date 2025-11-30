@@ -59,6 +59,7 @@ internal class KtFileTranslator(
             KtTokens.EQ -> translator.assign(symbol, rhs)
             KtTokens.PLUSEQ -> translator.augmentedAssignment(symbol, rhs, Operation.ADD)
             KtTokens.MINUSEQ -> translator.augmentedAssignment(symbol, rhs, Operation.SUB)
+            KtTokens.MULTEQ -> translator.augmentedAssignment(symbol, rhs, Operation.MUL)
             else -> error("Unsupported operation: ${expression.text}")
         }
     }
@@ -89,7 +90,6 @@ internal class KtFileTranslator(
                     ?: error("output requires an argument")
                 val operand = translator.resolveOperand(argument)
                 val outRegister = dialect.specialRegisters.output
-                    ?: dialect.specialRegisters.custom["out"]
                     ?: error("ISA does not define an output register")
                 when (operand) {
                     is Operand.Variable -> {

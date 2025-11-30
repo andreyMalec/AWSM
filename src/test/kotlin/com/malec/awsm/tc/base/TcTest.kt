@@ -18,10 +18,9 @@ abstract class TcTest : KotlinPsiTest() {
             println(it)
         }
         println("===== ASM =====")
-        val filtered = asm.filterNot { it is ASM.Label }
-        assertThat(filtered).isNotEmpty
+        assertThat(asm.filterNot { it is ASM.Label }).isNotEmpty
 
-        val actual = filtered.map { it.toString().trim() }
+        val actual = asm.map { it.toString().trim() }
         val expectedList = expected
             .lines()
             .map { it.trim() }
