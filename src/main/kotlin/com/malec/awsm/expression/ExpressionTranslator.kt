@@ -105,7 +105,11 @@ internal class ExpressionTranslator(
             )
 
             else -> {
-                val temp = symbols.declare("__tmp_${expr.hashCode()}", mutable = true)
+                val temp =
+//                    if (dialect.specialRegisters.immediate != null)
+//                    Symbol("__tmp_${expr.hashCode()}", true, dialect.specialRegisters.immediate)
+//                else
+                    symbols.declare("__tmp_${expr.hashCode()}", mutable = true)
                 assign(temp, expr)
                 Operand.Variable(temp)
             }

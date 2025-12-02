@@ -74,19 +74,20 @@ internal class ConditionalJumpTest : TcTest() {
             mov r2, r0
             add
             mov r5, r3
+            L3_main:
             mov r4, in
             mov r1, r4
             im 37
             mov r2, r0
             sub
-            im L3_main
+            im L4_main
             je
             im L2_main
             jmp
-            L3_main:
             L4_main:
-            mov out, r5
             L5_main:
+            mov out, r5
+            L6_main:
         """.trimIndent()
         assertEquals(original = code, expected = expected)
     }

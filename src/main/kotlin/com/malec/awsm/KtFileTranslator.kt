@@ -1,16 +1,20 @@
 package com.malec.awsm
 
+import com.malec.awsm.Argument
 import com.malec.awsm.expression.ExpressionTranslator
 import com.malec.awsm.expression.Operand
 import com.malec.awsm.expression.Operation
 import com.malec.awsm.isa.IsaDialect
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
+import java.util.ArrayDeque
 
 internal class KtFileTranslator(
     private val emitter: AsmEmitter,
     private val dialect: IsaDialect
 ) {
+    private val loopStack = ArrayDeque<LoopContext>()
+
     fun translate(file: KtFile) {
         file.declarations.filterIsInstance<KtNamedFunction>().forEach { translateFunction(it) }
     }
@@ -20,6 +24,7 @@ internal class KtFileTranslator(
         val registerPool = RegisterPool(dialect.registers())
         val symbolTable = SymbolTable(registerPool)
         val expressionTranslator = ExpressionTranslator(symbolTable, emitter, dialect)
+        loopStack.clear()
         emitter.label(name)
         val body = function.bodyExpression ?: return
         val statements = if (body is KtBlockExpression) body.statements else listOf(body)
@@ -55,6 +60,8 @@ internal class KtFileTranslator(
             is KtCallExpression -> handleCall(statement, translator)
             is KtWhileExpression -> handleWhile(statement, symbols, translator, nextLabel)
             is KtDoWhileExpression -> handleDoWhile(statement, symbols, translator, nextLabel)
+            is KtIfExpression -> handleIf(statement, symbols, translator, nextLabel)
+            is KtContinueExpression -> handleContinue(translator)
             else -> error("Unsupported statement: ${statement.text}")
         }
     }
@@ -108,7 +115,10 @@ internal class KtFileTranslator(
                         emitter.emit(dialect.instruction("mov", listOf(outRegister, operand.symbol.register)))
 
                     is Operand.Constant -> {
-                        val temp = translator.symbols.declare("__output_const_${argument.hashCode()}", true)
+                        val temp = if (dialect.specialRegisters.immediate != null)
+                            Symbol("__output_const_${argument.hashCode()}", true, dialect.specialRegisters.immediate)
+                        else
+                            translator.symbols.declare("__output_const_${argument.hashCode()}", true)
                         translator.assign(temp, argument)
                         emitter.emit(dialect.instruction("mov", listOf(outRegister, temp.register)))
                     }
@@ -129,11 +139,14 @@ internal class KtFileTranslator(
         val exitLabel = nextLabel()
         emitter.label(loopLabel)
         emitCondition(expression.condition, translator, exitLabel)
-        val body = expression.body ?: return
-        val bodyStatements = if (body is KtBlockExpression) body.statements else listOf(body)
-        bodyStatements.forEach { handleStatement(it, symbols, translator, nextLabel) }
-        translator.emitMoveToLabel(Argument.Label(loopLabel))
-        emitter.emit(dialect.instruction("jmp", emptyList()))
+        val context = LoopContext(loopLabel, exitLabel)
+        loopStack.addLast(context)
+        try {
+            statementsOf(expression.body).forEach { handleStatement(it, symbols, translator, nextLabel) }
+        } finally {
+            loopStack.removeLast()
+        }
+        jumpTo(loopLabel, translator)
         emitter.label(exitLabel)
     }
 
@@ -144,15 +157,45 @@ internal class KtFileTranslator(
         nextLabel: () -> String
     ) {
         val loopLabel = nextLabel()
+        val conditionLabel = nextLabel()
         val exitLabel = nextLabel()
         emitter.label(loopLabel)
-        val body = expression.body ?: return
-        val bodyStatements = if (body is KtBlockExpression) body.statements else listOf(body)
-        bodyStatements.forEach { handleStatement(it, symbols, translator, nextLabel) }
+        val context = LoopContext(conditionLabel, exitLabel)
+        loopStack.addLast(context)
+        try {
+            statementsOf(expression.body).forEach { handleStatement(it, symbols, translator, nextLabel) }
+        } finally {
+            loopStack.removeLast()
+        }
+        emitter.label(conditionLabel)
         emitCondition(expression.condition, translator, exitLabel)
-        translator.emitMoveToLabel(Argument.Label(loopLabel))
-        emitter.emit(dialect.instruction("jmp", emptyList()))
+        jumpTo(loopLabel, translator)
         emitter.label(exitLabel)
+    }
+
+    private fun handleIf(
+        expression: KtIfExpression,
+        symbols: SymbolTable,
+        translator: ExpressionTranslator,
+        nextLabel: () -> String
+    ) {
+        val elseLabel = nextLabel()
+        val endLabel = if (expression.`else` != null) nextLabel() else elseLabel
+        emitCondition(expression.condition, translator, elseLabel)
+        statementsOf(expression.then).forEach { handleStatement(it, symbols, translator, nextLabel) }
+        if (expression.`else` != null) {
+            jumpTo(endLabel, translator)
+        }
+        emitter.label(elseLabel)
+        expression.`else`?.let {
+            statementsOf(it).forEach { stmt -> handleStatement(stmt, symbols, translator, nextLabel) }
+            emitter.label(endLabel)
+        }
+    }
+
+    private fun handleContinue(translator: ExpressionTranslator) {
+        val context = loopStack.peekLast() ?: error("'continue' used outside of loop")
+        jumpTo(context.continueLabel, translator)
     }
 
     private fun emitCondition(
@@ -185,4 +228,19 @@ internal class KtFileTranslator(
             error("Unsupported loop condition: ${condition?.text}")
         }
     }
+
+    private fun statementsOf(body: KtExpression?): List<KtExpression> {
+        val expression = body ?: return emptyList()
+        return if (expression is KtBlockExpression) expression.statements else listOf(expression)
+    }
+
+    private fun jumpTo(label: String, translator: ExpressionTranslator) {
+        translator.emitMoveToLabel(Argument.Label(label))
+        emitter.emit(dialect.instruction("jmp", emptyList()))
+    }
+
+    private data class LoopContext(
+        val continueLabel: String,
+        val breakLabel: String
+    )
 }
