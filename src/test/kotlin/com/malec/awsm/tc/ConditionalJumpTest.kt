@@ -23,8 +23,7 @@ internal class ConditionalJumpTest : TcTest() {
             mov r5, r0
             L1_main:
             L2_main:
-            mov r4, in
-            mov r1, r4
+            mov r1, in
             im 37
             mov r2, r0
             sub
@@ -75,8 +74,7 @@ internal class ConditionalJumpTest : TcTest() {
             add
             mov r5, r3
             L3_main:
-            mov r4, in
-            mov r1, r4
+            mov r1, in
             im 37
             mov r2, r0
             sub

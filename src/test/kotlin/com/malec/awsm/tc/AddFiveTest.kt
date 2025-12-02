@@ -40,13 +40,11 @@ internal class AddFiveTest : TcTest() {
         val expected = """
             main:
             L0_main:
-            mov r4, in
-            mov r1, r4
+            mov r1, in
             im 5
             mov r2, r0
             add
-            mov r5, r3
-            mov out, r5
+            mov out, r3
             L1_main:
         """.trimIndent()
         assertEquals(original = code, expected = expected)

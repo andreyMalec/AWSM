@@ -9,11 +9,13 @@ class KotlinToAsmInterpreter(
     private val dialect: IsaDialect
 ) {
     private val emitter = AsmEmitter()
+    private val optimizer = AsmOptimizer(dialect)
 
     fun interpret(ktFile: KtFile): List<ASM> {
         val translator = KtFileTranslator(emitter, dialect)
         translator.translate(ktFile)
-        return emitter.instructions
+        val optimized = optimizer.optimize(emitter.instructions)
+        return optimized
     }
 
     companion object {
