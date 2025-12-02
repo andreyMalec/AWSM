@@ -1,19 +1,19 @@
 package com.malec.awsm
 
-import com.malec.awsm.Argument
 import com.malec.awsm.expression.ExpressionTranslator
 import com.malec.awsm.expression.Operand
 import com.malec.awsm.expression.Operation
 import com.malec.awsm.isa.IsaDialect
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
-import java.util.ArrayDeque
+import java.util.*
 
 internal class KtFileTranslator(
     private val emitter: AsmEmitter,
     private val dialect: IsaDialect
 ) {
     private val loopStack = ArrayDeque<LoopContext>()
+    private var tempSymbolIndex = 0
 
     fun translate(file: KtFile) {
         file.declarations.filterIsInstance<KtNamedFunction>().forEach { translateFunction(it) }
@@ -62,6 +62,7 @@ internal class KtFileTranslator(
             is KtDoWhileExpression -> handleDoWhile(statement, symbols, translator, nextLabel)
             is KtIfExpression -> handleIf(statement, symbols, translator, nextLabel)
             is KtContinueExpression -> handleContinue(translator)
+            is KtWhenExpression -> handleWhen(statement, symbols, translator, nextLabel)
             else -> error("Unsupported statement: ${statement.text}")
         }
     }
@@ -196,6 +197,59 @@ internal class KtFileTranslator(
     private fun handleContinue(translator: ExpressionTranslator) {
         val context = loopStack.peekLast() ?: error("'continue' used outside of loop")
         jumpTo(context.continueLabel, translator)
+    }
+
+    private fun handleWhen(
+        expression: KtWhenExpression,
+        symbols: SymbolTable,
+        translator: ExpressionTranslator,
+        nextLabel: () -> String
+    ) {
+        val entries = expression.entries
+        if (entries.isEmpty()) return
+        val psiFactory = KtPsiFactory(expression.project, true)
+        val subjectExpression = expression.subjectExpression ?: error("'when' without subject is not supported")
+        val subjectReferenceText = if (subjectExpression is KtNameReferenceExpression) {
+            subjectExpression.text
+        } else {
+            val tempName = "__when_subject_${tempSymbolIndex++}"
+            val tempSymbol = symbols.declare(tempName, mutable = false)
+            translator.assign(tempSymbol, subjectExpression)
+            tempName
+        }
+        fun newSubjectReference(): KtExpression = psiFactory.createExpression(subjectReferenceText)
+        val endLabel = nextLabel()
+        val elseEntry = entries.firstOrNull { it.isElse }
+        val elseLabel = elseEntry?.let { nextLabel() }
+        val regularEntries = entries.filterNot { it.isElse }
+        regularEntries.forEachIndexed { index, entry ->
+            val branchLabel = nextLabel()
+            val fallthroughLabel = if (index == regularEntries.lastIndex) {
+                elseLabel ?: endLabel
+            } else {
+                nextLabel()
+            }
+            entry.conditions.forEach { condition ->
+                val conditionExpression = (condition as? KtWhenConditionWithExpression)?.expression
+                    ?: error("Unsupported when condition: ${condition.text}")
+                translator.emitSubtraction(newSubjectReference(), conditionExpression)
+                translator.emitMoveToLabel(Argument.Label(branchLabel))
+                emitter.emit(dialect.instruction("je", emptyList()))
+            }
+            translator.emitMoveToLabel(Argument.Label(fallthroughLabel))
+            emitter.emit(dialect.instruction("jmp", emptyList()))
+            emitter.label(branchLabel)
+            statementsOf(entry.expression).forEach { handleStatement(it, symbols, translator, nextLabel) }
+            jumpTo(endLabel, translator)
+            if (fallthroughLabel != elseLabel && fallthroughLabel != endLabel) {
+                emitter.label(fallthroughLabel)
+            }
+        }
+        if (elseEntry != null) {
+            emitter.label(elseLabel!!)
+            statementsOf(elseEntry.expression).forEach { handleStatement(it, symbols, translator, nextLabel) }
+        }
+        emitter.label(endLabel)
     }
 
     private fun emitCondition(
